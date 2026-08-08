@@ -100,6 +100,28 @@ object Installer {
         return out
     }
 
+    /**
+     * Copy a downloaded APK into shared Downloads so it survives cache
+     * eviction and can be found in a file manager — which is the whole point
+     * of downloading without installing.
+     */
+    fun keep(context: Context, apk: File, name: String): String {
+        val values = android.content.ContentValues().apply {
+            put(android.provider.MediaStore.Downloads.DISPLAY_NAME, name)
+            put(android.provider.MediaStore.Downloads.MIME_TYPE, "application/vnd.android.package-archive")
+        }
+        val resolver = context.contentResolver
+        val uri = resolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+        if (uri != null) {
+            resolver.openOutputStream(uri)?.use { out -> apk.inputStream().use { it.copyTo(out) } }
+            return "Downloads/$name"
+        }
+        // Older devices without the Downloads collection: keep the cache copy.
+        val fallback = File(context.getExternalFilesDir(null), name)
+        apk.copyTo(fallback, overwrite = true)
+        return fallback.absolutePath
+    }
+
     fun install(context: Context, apk: File) {
         val uri: Uri = FileProvider.getUriForFile(
             context, "${context.packageName}.files", apk

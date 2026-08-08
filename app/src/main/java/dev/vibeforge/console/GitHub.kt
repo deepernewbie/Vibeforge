@@ -78,6 +78,41 @@ class GitHub(private val token: String) {
         return JSONObject(post("https://api.github.com/user/repos", body)).optString("full_name")
     }
 
+    /** The user's repositories, newest activity first, for the picker. */
+    fun repos(limit: Int = 100): List<Repo> {
+        val arr = JSONArray(get(
+            "https://api.github.com/user/repos?per_page=$limit&sort=pushed&affiliation=owner"))
+        return (0 until arr.length()).map { i ->
+            val r = arr.getJSONObject(i)
+            Repo(
+                name = r.optString("name"),
+                owner = r.optJSONObject("owner")?.optString("login") ?: "",
+                private = r.optBoolean("private"),
+                pushedAt = r.optString("pushed_at").take(10),
+                defaultBranch = r.optString("default_branch", "main")
+            )
+        }
+    }
+
+    data class Repo(
+        val name: String, val owner: String, val private: Boolean,
+        val pushedAt: String, val defaultBranch: String
+    )
+
+    /** What is already in a repo, so an overwrite can be described before it happens. */
+    fun treeSummary(owner: String, repo: String, branch: String): Set<String> {
+        val head = branchHead(owner, repo, branch) ?: return emptySet()
+        val treeSha = JSONObject(get("${base(owner, repo)}/git/commits/$head"))
+            .getJSONObject("tree").getString("sha")
+        val tree = JSONObject(get("${base(owner, repo)}/git/trees/$treeSha?recursive=1"))
+            .optJSONArray("tree") ?: return emptySet()
+        return (0 until tree.length())
+            .map { tree.getJSONObject(it) }
+            .filter { it.optString("type") == "blob" }
+            .map { it.optString("path") }
+            .toSet()
+    }
+
     // ── pushing ──────────────────────────────────────────────────────────────
 
     private fun base(owner: String, repo: String) = "https://api.github.com/repos/$owner/$repo"

@@ -400,6 +400,19 @@ relevant rather than letting them find out.
 
 ---
 
+## Icons
+
+VibeForge can generate the icon set itself: the person picks an image, crops a
+square, and it writes `ic_launcher.png`, `ic_launcher_round.png` and an
+adaptive foreground at five densities, plus the adaptive-icon XML and a
+background colour sampled from the image edges. It also adds `android:icon`
+and `android:roundIcon` to the manifest if they are missing.
+
+So do not hand-write mipmap files or invent placeholder icons. Leave the
+manifest without an icon attribute and let the app fill it in — or, if you do
+set one, point it at `@mipmap/ic_launcher` so the generated files land in the
+right place.
+
 ## What VibeForge will not push
 
 These are skipped automatically, so do not rely on them reaching the repo:
