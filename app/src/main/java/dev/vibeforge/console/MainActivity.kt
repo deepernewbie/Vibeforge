@@ -677,6 +677,11 @@ class MainActivity : Activity() {
 
         io.execute {
             try {
+                // Clear out anything stale before choosing, so "the newest" is
+                // also "the only one" and cannot be got wrong later.
+                val removed = try { gh.pruneReleaseAssets(owner, repo) } catch (e: Exception) { 0 }
+                if (removed > 0) say("Removed $removed stale APK(s) from the release.")
+
                 val apks = gh.latestApks(owner, repo)
                 if (apks.isEmpty()) {
                     post { setStatus("No APK in the latest releases.") }
@@ -684,11 +689,6 @@ class MainActivity : Activity() {
                     return@execute
                 }
                 val apk = apks.first()
-                if (apks.size > 1) {
-                    say("${apks.size} APKs on the release — taking the newest (${apk.updated.take(16)}).")
-                    say("Older ones are still there; a build that names its APK after the commit " +
-                        "adds a file each time instead of replacing it.")
-                }
                 say("Downloading ${apk.name}, uploaded ${apk.updated.take(16)} (${apk.size / 1024} KB)…")
                 val file = Installer.download(this, apk.url, token) { read, total ->
                     if (total > 0) post { setStatus("Downloading ${read * 100 / total}%") }

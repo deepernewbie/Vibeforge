@@ -55,6 +55,7 @@ class GitHub(private val token: String) {
     }
 
     private fun get(url: String) = request("GET", url)
+    private fun delete(url: String) = request("DELETE", url)
     private fun post(url: String, body: JSONObject) = request("POST", url, body.toString())
     private fun patch(url: String, body: JSONObject) = request("PATCH", url, body.toString())
 
@@ -347,6 +348,36 @@ class GitHub(private val token: String) {
     // ── releases ─────────────────────────────────────────────────────────────
 
     data class Asset(val name: String, val url: String, val size: Long, val updated: String)
+
+    /**
+     * Delete every APK on the release except the newest.
+     *
+     * A build that names its output after the commit adds an asset each time
+     * rather than replacing one, so the release quietly accumulates and any
+     * client picking "the first" installs something weeks old. Tidying up is
+     * the tool's job — nobody should have to open a browser to keep their own
+     * build pipeline honest.
+     */
+    fun pruneReleaseAssets(owner: String, repo: String): Int {
+        val releases = JSONArray(get("${base(owner, repo)}/releases?per_page=5"))
+        var removed = 0
+        for (i in 0 until releases.length()) {
+            val assets = releases.getJSONObject(i).optJSONArray("assets") ?: continue
+            val apks = (0 until assets.length())
+                .map { assets.getJSONObject(it) }
+                .filter { it.optString("name").endsWith(".apk") }
+                .sortedByDescending { it.optString("updated_at").ifEmpty { it.optString("created_at") } }
+            // Keep the newest; everything behind it is a trap.
+            for (stale in apks.drop(1)) {
+                try {
+                    delete("${base(owner, repo)}/releases/assets/${stale.getLong("id")}")
+                    removed++
+                } catch (e: Exception) { /* a failed tidy-up must not stop an install */ }
+            }
+            if (apks.isNotEmpty()) break
+        }
+        return removed
+    }
 
     fun latestApks(owner: String, repo: String): List<Asset> {
         val releases = JSONArray(get("${base(owner, repo)}/releases?per_page=5"))
