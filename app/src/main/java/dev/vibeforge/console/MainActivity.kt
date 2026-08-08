@@ -602,6 +602,18 @@ class MainActivity : Activity() {
                 }
                 Store.put(this, Store.LAST_COMMIT, sha)
                 say("Pushed ${sha.take(7)} — ${files.size} file(s).")
+
+                if (icon != null) {
+                    val inRepo = try { gh.treeSummary(owner, repo, branch) } catch (e: Exception) { emptySet<String>() }
+                    val icons = inRepo.count { it.contains("/mipmap-") }
+                    val manifest = inRepo.firstOrNull { it.endsWith("AndroidManifest.xml") }
+                    val declared = manifest != null &&
+                        files[manifest]?.let { String(it).contains("android:icon=") } == true
+                    say(if (icons > 0) "Verified: $icons icon file(s) are in the repository."
+                        else "Warning: no mipmap files found in the repository after the push.")
+                    say(if (declared) "Verified: the manifest declares android:icon."
+                        else "Warning: the manifest does not declare android:icon — the launcher will use the default.")
+                }
                 post { setDetail("Actions should start within a few seconds.") }
                 ui.postDelayed({ checkRuns() }, 6000)
             } catch (e: Exception) { report(e) }
@@ -736,7 +748,10 @@ class MainActivity : Activity() {
         logView.append("$time  $text\n")
         // Only chase the tail when the log is on screen; scrolling a hidden
         // view is what made the page jump around while you were reading it.
-        if (logVisible) logScroll.post { logScroll.fullScroll(View.FOCUS_DOWN) }
+        if (logVisible) logScroll.post {
+            val child = logScroll.getChildAt(0)
+            if (child != null) logScroll.scrollTo(0, maxOf(0, child.height - logScroll.height))
+        }
     }
 
     private fun setStatus(text: String) {
