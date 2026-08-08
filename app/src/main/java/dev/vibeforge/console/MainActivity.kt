@@ -164,6 +164,7 @@ class MainActivity : Activity() {
 
         setContentView(root)
         restore()
+        loadSavedIcon()
         showLastCrash()
     }
 
@@ -411,11 +412,7 @@ class MainActivity : Activity() {
             .setTitle("App icon")
             .setMessage("An icon is ready and will be written into the project on the next push.")
             .setPositiveButton("Choose another") { _, _ -> pickImage() }
-            .setNeutralButton("Remove") { _, _ ->
-                iconSource = null
-                iconButton.text = "No icon set"
-                say("Icon cleared.")
-            }
+            .setNeutralButton("Remove") { _, _ -> clearIcon() }
             .setNegativeButton("Keep", null)
             .show()
     }
@@ -429,69 +426,84 @@ class MainActivity : Activity() {
     }
 
     /**
-     * A square selector over the picture: one slider for size, two for
-     * position. Deliberately not a gesture-driven crop editor — every touch
-     * handler is code that can misbehave on a device I cannot test, and this
-     * covers what an icon actually needs.
+     * Frame the icon by moving the picture under a fixed square.
+     *
+     * The sliders this replaces were the kind of thing that reads fine in code
+     * and is miserable in the hand — you cannot see what you are doing while
+     * dragging a bar underneath the image.
      */
     private fun showCropDialog(source: Bitmap) {
-        val preview = ImageView(this)
-        val sizeBar = SeekBar(this).apply { max = 100; progress = 100 }
-        val xBar = SeekBar(this).apply { max = 100; progress = 50 }
-        val yBar = SeekBar(this).apply { max = 100; progress = 50 }
-        val hint = TextView(this).apply { setTextColor(faint); textSize = 11f }
-
-        fun currentRect(): Rect {
-            val shortest = minOf(source.width, source.height)
-            val side = (shortest * (0.25f + 0.75f * sizeBar.progress / 100f)).toInt().coerceAtLeast(32)
-            val left = ((source.width - side) * xBar.progress / 100f).toInt()
-            val top = ((source.height - side) * yBar.progress / 100f).toInt()
-            return Rect(left, top, left + side, top + side)
-        }
-        fun refresh() {
-            val r = currentRect()
-            preview.setImageBitmap(IconMaker.crop(source, r))
-            hint.text = "${r.width()}×${r.height()} taken from ${source.width}×${source.height}"
-        }
-
-        val listener = object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(s: SeekBar?, p: Int, fromUser: Boolean) { refresh() }
-            override fun onStartTrackingTouch(s: SeekBar?) {}
-            override fun onStopTrackingTouch(s: SeekBar?) {}
-        }
-        sizeBar.setOnSeekBarChangeListener(listener)
-        xBar.setOnSeekBarChangeListener(listener)
-        yBar.setOnSeekBarChangeListener(listener)
-
-        fun caption(text: String) = TextView(this).apply {
-            this.text = text
-            setTextColor(soft); textSize = 12f
-            setPadding(0, dp(10), 0, 0)
-        }
-
+        val crop = CropView(this, source)
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(12), dp(20), dp(12))
-            addView(preview, LinearLayout.LayoutParams(dp(170), dp(170)).apply {
-                gravity = Gravity.CENTER_HORIZONTAL
+            addView(crop, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(340)))
+            addView(TextView(this@MainActivity).apply {
+                text = "Drag to move, pinch to zoom. The circle shows what a launcher will keep."
+                setTextColor(faint); textSize = 11f
+                setPadding(dp(20), dp(8), dp(20), dp(12))
             })
-            addView(hint)
-            addView(caption("Size")); addView(sizeBar)
-            addView(caption("Left / right")); addView(xBar)
-            addView(caption("Up / down")); addView(yBar)
         }
-        refresh()
 
         AlertDialog.Builder(this)
-            .setTitle("Crop the icon")
-            .setView(ScrollView(this).apply { addView(content) })
+            .setTitle("Frame the icon")
+            .setView(content)
             .setPositiveButton("Use this") { _, _ ->
-                iconSource = IconMaker.crop(source, currentRect())
-                iconButton.text = "Icon ready — written on next push"
-                say("Icon set: five densities plus an adaptive icon will be generated.")
+                val bitmap = crop.result()
+                iconSource = bitmap
+                saveIcon(bitmap)
+                showIconState()
+                say("Icon set — five densities plus an adaptive icon will be generated on push.")
             }
             .setNegativeButton("Cancel", null)
             .show()
+    }
+
+    /**
+     * Keep the chosen icon on disk.
+     *
+     * Held only in a field it vanished whenever Android recreated the activity
+     * — after a rotation, or after the file picker took the app out of memory
+     * — and the next push silently carried no icon at all.
+     */
+    private fun saveIcon(bitmap: Bitmap) {
+        try {
+            java.io.File(filesDir, "icon.png").outputStream().use {
+                bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)
+            }
+        } catch (e: Exception) { say("Could not store the icon: ${e.message}") }
+    }
+
+    private fun loadSavedIcon() {
+        val file = java.io.File(filesDir, "icon.png")
+        if (!file.exists()) return
+        iconSource = try {
+            android.graphics.BitmapFactory.decodeFile(file.absolutePath)
+        } catch (e: Exception) { null }
+        showIconState()
+    }
+
+    private fun clearIcon() {
+        iconSource = null
+        java.io.File(filesDir, "icon.png").delete()
+        showIconState()
+        say("Icon cleared.")
+    }
+
+    /** Show the actual picture on the button, so "is it set?" needs no answer. */
+    private fun showIconState() {
+        val icon = iconSource
+        if (icon == null) {
+            iconButton.text = "No icon set"
+            iconButton.setCompoundDrawables(null, null, null, null)
+            return
+        }
+        iconButton.text = "  Icon ready — added on next push"
+        val side = dp(34)
+        val thumb = android.graphics.drawable.BitmapDrawable(
+            resources, Bitmap.createScaledBitmap(icon, side, side, true))
+        thumb.setBounds(0, 0, side, side)
+        iconButton.setCompoundDrawables(thumb, null, null, null)
     }
 
     // ── step 4: push ─────────────────────────────────────────────────────────
@@ -528,7 +540,11 @@ class MainActivity : Activity() {
                         append("   $added new\n")
                         append("   ${overwritten.size} replaced\n")
                         if (untouched > 0) append("   $untouched left alone in the repo\n")
-                        if (iconSource != null) append("\nIcon files will be generated and added.\n")
+                        if (iconSource != null) {
+                            append("\nIcon: 17 files will be generated and added.\n")
+                        } else {
+                            append("\nNo icon set — the app will use Android's default.\n")
+                        }
                         if (overwritten.isNotEmpty()) {
                             append("\nReplacing:\n")
                             overwritten.take(8).forEach { append("   $it\n") }
@@ -564,14 +580,20 @@ class MainActivity : Activity() {
                     // Icons in the tree do nothing unless the manifest points
                     // at them, and most templates never do.
                     val manifestPath = files.keys.firstOrNull { it.endsWith("AndroidManifest.xml") }
+                    if (manifestPath == null) {
+                        say("No AndroidManifest.xml in this folder — the icon files went up but nothing points at them.")
+                    }
                     if (manifestPath != null) {
                         val patched = IconMaker.patchManifest(String(files[manifestPath]!!))
                         if (patched != null) {
                             files[manifestPath] = patched.toByteArray()
-                            say("Manifest updated to use the new icon.")
+                            say("Manifest updated: android:icon added.")
+                        } else {
+                            say("Manifest already names an icon — make sure it is @mipmap/ic_launcher.")
                         }
                     }
                     say(generated.note)
+                    say("First icon path: ${generated.files.keys.first()}")
                 }
 
                 val stamp = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date())
