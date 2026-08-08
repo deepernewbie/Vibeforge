@@ -684,7 +684,12 @@ class MainActivity : Activity() {
                     return@execute
                 }
                 val apk = apks.first()
-                say("Downloading ${apk.name} (${apk.size / 1024} KB)…")
+                if (apks.size > 1) {
+                    say("${apks.size} APKs on the release — taking the newest (${apk.updated.take(16)}).")
+                    say("Older ones are still there; a build that names its APK after the commit " +
+                        "adds a file each time instead of replacing it.")
+                }
+                say("Downloading ${apk.name}, uploaded ${apk.updated.take(16)} (${apk.size / 1024} KB)…")
                 val file = Installer.download(this, apk.url, token) { read, total ->
                     if (total > 0) post { setStatus("Downloading ${read * 100 / total}%") }
                 }

@@ -346,7 +346,7 @@ class GitHub(private val token: String) {
 
     // ── releases ─────────────────────────────────────────────────────────────
 
-    data class Asset(val name: String, val url: String, val size: Long)
+    data class Asset(val name: String, val url: String, val size: Long, val updated: String)
 
     fun latestApks(owner: String, repo: String): List<Asset> {
         val releases = JSONArray(get("${base(owner, repo)}/releases?per_page=5"))
@@ -362,9 +362,11 @@ class GitHub(private val token: String) {
                         // repos; private repos need the api url with an Accept
                         // of application/octet-stream, handled by the caller.
                         url = it.getString("browser_download_url"),
-                        size = it.optLong("size")
+                        size = it.optLong("size"),
+                        updated = it.optString("updated_at").ifEmpty { it.optString("created_at") }
                     )
                 }
+                .sortedByDescending { it.updated }
             if (apks.isNotEmpty()) return apks
         }
         return emptyList()
