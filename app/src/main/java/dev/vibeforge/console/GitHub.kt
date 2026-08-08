@@ -180,28 +180,130 @@ class GitHub(private val token: String) {
     fun runForCommit(owner: String, repo: String, sha: String): Run? =
         latestRuns(owner, repo, 10).firstOrNull { sha.startsWith(it.sha) }
 
-    /** Failure logs, trimmed to the lines that explain what went wrong. */
-    fun failureLog(owner: String, repo: String, runId: Long, maxLines: Int = 60): String {
-        val jobs = JSONObject(get("${base(owner, repo)}/actions/runs/$runId/jobs"))
-            .optJSONArray("jobs") ?: return "(no jobs)"
-        val sb = StringBuilder()
+    /**
+     * The actual log of the failing job.
+     *
+     * The run-level logs endpoint returns a zip, which is why this originally
+     * settled for step names — but the *job*-level endpoint returns plain text,
+     * which is all that was ever needed. It answers with a redirect to a signed
+     * URL that must be fetched without the Authorization header, or the CDN
+     * refuses it.
+     */
+    fun jobLog(owner: String, repo: String, jobId: Long): String {
+        val url = "${base(owner, repo)}/actions/jobs/$jobId/logs"
+        val conn = (URL(url).openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            instanceFollowRedirects = false
+            setRequestProperty("Authorization", "Bearer $token")
+            setRequestProperty("Accept", "application/vnd.github+json")
+            setRequestProperty("User-Agent", "VibeForge")
+            connectTimeout = 20000
+            readTimeout = 60000
+        }
+        val status = conn.responseCode
+        val location = conn.getHeaderField("Location")
+        val direct = if (status in 200..299) {
+            BufferedReader(InputStreamReader(conn.inputStream)).use { it.readText() }
+        } else null
+        conn.disconnect()
+        if (direct != null) return direct
+        if (location.isNullOrEmpty()) return "(no log available — status $status)"
+
+        val signed = (URL(location).openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            instanceFollowRedirects = true
+            setRequestProperty("User-Agent", "VibeForge")
+            connectTimeout = 20000
+            readTimeout = 60000
+        }
+        val text = try {
+            BufferedReader(InputStreamReader(signed.inputStream)).use { it.readText() }
+        } catch (e: Exception) {
+            "(could not download the log: ${e.message})"
+        }
+        signed.disconnect()
+        return text
+    }
+
+    /**
+     * Trim a build log to the part that explains the failure.
+     *
+     * A Gradle log runs to thousands of lines of dependency resolution. What
+     * matters is a handful: Kotlin's `e:` lines, Gradle's FAILURE block, and
+     * whichever task died. Everything else is noise you would have to scroll
+     * past on a phone before you could paste anything useful to anyone.
+     */
+    fun failureReport(owner: String, repo: String, runId: Long, maxChars: Int = 6000): String {
+        val jobs = try {
+            JSONObject(get("${base(owner, repo)}/actions/runs/$runId/jobs"))
+                .optJSONArray("jobs") ?: JSONArray()
+        } catch (e: Exception) {
+            return "Could not list jobs: ${e.message}"
+        }
+
+        val report = StringBuilder()
         for (i in 0 until jobs.length()) {
             val job = jobs.getJSONObject(i)
             if (job.optString("conclusion") == "success") continue
-            sb.append("job: ${job.optString("name")}\n")
-            val steps = job.optJSONArray("steps") ?: continue
+
+            report.append("job: ${job.optString("name")} — ${job.optString("conclusion")}\n")
+            val steps = job.optJSONArray("steps") ?: JSONArray()
             for (j in 0 until steps.length()) {
                 val step = steps.getJSONObject(j)
-                if (step.optString("conclusion") !in listOf("failure", "cancelled")) continue
-                sb.append("  ✕ ${step.optString("name")}\n")
+                if (step.optString("conclusion") in listOf("failure", "cancelled")) {
+                    report.append("failing step: ${step.optString("name")}\n")
+                }
+            }
+
+            val log = try { jobLog(owner, repo, job.getLong("id")) } catch (e: Exception) {
+                "(log fetch failed: ${e.message})"
+            }
+            report.append("\n").append(interesting(log)).append("\n")
+        }
+
+        if (report.isEmpty()) return "No failing job reported yet — the run may still be going."
+        return report.toString().take(maxChars)
+    }
+
+    private fun interesting(log: String): String {
+        val lines = log.lines()
+        val marks = Regex(
+            "(?i)^\\s*e: |error:|FAILURE:|> Task .*FAILED|Caused by:|Execution failed|" +
+            "Unresolved reference|Type mismatch|::error::|what went wrong"
+        )
+
+        val keep = sortedSetOf<Int>()
+        lines.forEachIndexed { i, line ->
+            if (marks.containsMatchIn(line)) {
+                // A compiler error alone is rarely enough; the line after it
+                // usually carries the caret and the explanation.
+                for (k in (i - 1)..(i + 3)) if (k in lines.indices) keep.add(k)
             }
         }
-        // Raw logs come back as a zip, which is more machinery than this is
-        // worth on a phone; the failing step name plus the run link gets you
-        // to the answer nearly as fast.
-        return if (sb.isEmpty()) "(no failing step reported yet)" else sb.toString().lines()
-            .take(maxLines).joinToString("\n")
+
+        val picked = if (keep.isEmpty()) {
+            // Nothing matched, so the tail is the best guess at what happened.
+            lines.takeLast(40)
+        } else {
+            var previous = -2
+            buildList {
+                for (idx in keep) {
+                    if (idx != previous + 1 && previous >= 0) add("   …")
+                    add(lines[idx].trimEnd())
+                    previous = idx
+                }
+            }
+        }
+
+        // GitHub prefixes every line with a timestamp; it is pure noise here.
+        return picked.joinToString("\n") {
+            it.replace(Regex("^\\d{4}-\\d{2}-\\d{2}T[\\d:.]+Z\\s?"), "")
+        }.take(5000)
     }
+
+    /** Kept for the status line — the short version. */
+    fun failureLog(owner: String, repo: String, runId: Long, maxLines: Int = 60): String =
+        failureReport(owner, repo, runId).lines().take(maxLines).joinToString("\n")
 
     // ── releases ─────────────────────────────────────────────────────────────
 

@@ -45,8 +45,11 @@ class MainActivity : Activity() {
     private lateinit var pushButton: Button
     private lateinit var watchButton: Button
     private lateinit var installButton: Button
+    private lateinit var copyButton: Button
 
     private var projectUri: Uri? = null
+    private var lastFailure: String = ""
+
     private var lastCommit: String = ""
     private var polling = false
 
@@ -123,6 +126,13 @@ class MainActivity : Activity() {
         status = body("")
         status.setTypeface(android.graphics.Typeface.MONOSPACE)
         root.addView(status)
+
+        // The whole point of a phone build console: when it breaks, get the
+        // error into a form you can paste somewhere useful in one tap.
+        copyButton = button("Copy build log", bad) { copyFailure() }
+        copyButton.visibility = View.GONE
+        copyButton.setOnLongClickListener { shareFailure(); true }
+        root.addView(copyButton)
 
         // ── 4. Install ───────────────────────────────────────────────────────
         root.addView(heading("4 · Install"))
@@ -280,6 +290,8 @@ class MainActivity : Activity() {
         val branch = branchField.text.toString().trim().ifEmpty { "main" }
         if (owner.isEmpty() || repo.isEmpty()) { say("Owner and repo are required."); return }
 
+        lastFailure = ""
+        copyButton.visibility = View.GONE
         background("Reading folder…") {
             val scan = Project.read(this, uri)
             say("${scan.files.size} file(s), ${scan.totalBytes / 1024} KB")
@@ -325,8 +337,14 @@ class MainActivity : Activity() {
                 }
                 else -> {
                     say("Build ${r.conclusion} — ${r.url}")
-                    val detail = gh.failureLog(owner, repo, r.id)
+                    setStatus("fetching the build log…")
+                    val detail = gh.failureReport(owner, repo, r.id)
+                    lastFailure = "Build ${r.conclusion} for ${r.sha}\n${r.url}\n\n$detail"
                     say(detail)
+                    ui.post {
+                        copyButton.visibility = View.VISIBLE
+                        setStatus("build failed — copy the log and send it to whoever wrote the code")
+                    }
                 }
             }
         }
@@ -352,6 +370,22 @@ class MainActivity : Activity() {
             say("Downloaded. Opening the installer…")
             ui.post { Installer.install(this, file) }
         }
+    }
+
+    private fun copyFailure() {
+        val text = lastFailure.ifBlank { log.text.toString() }
+        val clip = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        clip.setPrimaryClip(android.content.ClipData.newPlainText("Build failure", text))
+        Toast.makeText(this, "Copied — paste it to whoever is writing the code", Toast.LENGTH_LONG).show()
+    }
+
+    private fun shareFailure() {
+        val text = lastFailure.ifBlank { log.text.toString() }
+        startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, text)
+            putExtra(Intent.EXTRA_SUBJECT, "VibeForge build failure")
+        }, "Send the build log"))
     }
 
     // ── plumbing ─────────────────────────────────────────────────────────────

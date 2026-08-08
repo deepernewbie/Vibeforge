@@ -486,8 +486,10 @@ rough order of frequency:
 | Build succeeds, no release | see below — check Settings → Actions → Workflow permissions |
 | `Unsupported class file major version` | JDK mismatch; keep 17 everywhere |
 
-When the person sends you a failure, ask for the step name and the last twenty
-lines. Guessing from the step name alone wastes a cycle.
+When a build fails, VibeForge fetches the failing job's log, trims it to the
+lines that matter — Kotlin's `e:` errors, Gradle's FAILURE block, the task that
+died — and shows a **Copy build log** button. The person can paste that
+straight to you. Ask for it rather than guessing from the step name.
 
 ### A green build with no APK
 
