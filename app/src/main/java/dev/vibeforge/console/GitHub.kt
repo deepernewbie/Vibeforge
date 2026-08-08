@@ -266,10 +266,17 @@ class GitHub(private val token: String) {
     }
 
     private fun interesting(log: String): String {
-        val lines = log.lines()
+        // GitHub prefixes every line with an ISO timestamp. Stripping it after
+        // filtering — as this did at first — means `^e:` never matches and the
+        // compiler errors, the one thing worth reading, are dropped.
+        val lines = log.lines().map {
+            it.replace(Regex("^\\d{4}-\\d{2}-\\d{2}T[\\d:.]+Z\\s?"), "").trimEnd()
+        }
+
         val marks = Regex(
-            "(?i)^\\s*e: |error:|FAILURE:|> Task .*FAILED|Caused by:|Execution failed|" +
-            "Unresolved reference|Type mismatch|::error::|what went wrong"
+            "(?i)^\\s*e: |^\\s*w: |error:|FAILURE:|> Task .*FAILED|Caused by:|Execution failed|" +
+            "Unresolved reference|Type mismatch|None of the following|Cannot infer|" +
+            "Overload resolution|Expecting |::error::|what went wrong"
         )
 
         val keep = sortedSetOf<Int>()
@@ -283,22 +290,19 @@ class GitHub(private val token: String) {
 
         val picked = if (keep.isEmpty()) {
             // Nothing matched, so the tail is the best guess at what happened.
-            lines.takeLast(40)
+            lines.takeLast(50)
         } else {
             var previous = -2
             buildList {
                 for (idx in keep) {
                     if (idx != previous + 1 && previous >= 0) add("   …")
-                    add(lines[idx].trimEnd())
+                    add(lines[idx])
                     previous = idx
                 }
             }
         }
 
-        // GitHub prefixes every line with a timestamp; it is pure noise here.
-        return picked.joinToString("\n") {
-            it.replace(Regex("^\\d{4}-\\d{2}-\\d{2}T[\\d:.]+Z\\s?"), "")
-        }.take(5000)
+        return picked.joinToString("\n").take(5000)
     }
 
     /** Kept for the status line — the short version. */
