@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The downloaded APK lives here; the package installer reads it through
+     FileProvider because a raw file:// URI is refused on modern Android. -->
+<paths>
+    <cache-path name="downloads" path="apk/" />
+</paths>

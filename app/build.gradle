@@ -1,0 +1,51 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+android {
+    namespace 'dev.vibeforge.console'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "dev.vibeforge.console"
+        minSdk 26
+        targetSdk 34
+        versionCode 2
+        versionName "1.1"
+    }
+
+    // Same signing story as any sideloaded app: a persistent key from repo
+    // secrets when available, a throwaway one otherwise. Without a persistent
+    // key, each build refuses to install over the previous one.
+    signingConfigs {
+        release {
+            storeFile     file("${rootProject.projectDir}/app/release.keystore")
+            storePassword System.getenv("VIBEFORGE_KEYSTORE_PASSWORD") ?: "android"
+            keyAlias      System.getenv("VIBEFORGE_KEY_ALIAS")         ?: "androiddebugkey"
+            keyPassword   System.getenv("VIBEFORGE_KEY_PASSWORD")      ?: "android"
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions { jvmTarget = '17' }
+}
+
+dependencies {
+    // No appcompat: the activity extends android.app.Activity and uses a
+    // platform theme, so there is no themes.xml to keep in sync and one less
+    // library whose version has to line up.
+    implementation 'androidx.core:core-ktx:1.12.0'
+    implementation 'androidx.documentfile:documentfile:1.0.1'
+    implementation 'androidx.security:security-crypto:1.1.0-alpha06'
+}
