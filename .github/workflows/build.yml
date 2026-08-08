@@ -1,0 +1,70 @@
+---
+# Builds VibeForge itself. Any project you push with VibeForge needs a workflow like
+# this one — VibeForge triggers it, it does the work, and it publishes an APK
+# to a release so the phone has something to download.
+
+name: Build APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Restore signing keystore
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > app/release.keystore
+            echo "Using the persistent keystore."
+          else
+            echo "::warning::No KEYSTORE_B64 secret — this APK will not install over a previous build."
+            keytool -genkeypair -v \
+              -keystore app/release.keystore -storetype PKCS12 \
+              -storepass android -keypass android -alias androiddebugkey \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=VibeForge, OU=VibeForge, O=VibeForge, L=Phone, S=NA, C=US"
+          fi
+
+      - name: Build
+        env:
+          VIBEFORGE_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          VIBEFORGE_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          VIBEFORGE_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          gradle wrapper --gradle-version=8.2
+          chmod +x ./gradlew
+          ./gradlew assembleRelease --no-daemon
+
+      - name: Collect APK
+        run: |
+          SHORT=$(echo "${{ github.sha }}" | cut -c1-7)
+          SRC=$(find app/build/outputs/apk/release -name '*.apk' | head -1)
+          cp "$SRC" "VibeForge-$SHORT.apk"
+          ls -la VibeForge-*.apk
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Latest VibeForge build
+          body: Built from `${{ github.sha }}`.
+          files: VibeForge-*.apk
+          prerelease: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
