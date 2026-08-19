@@ -67,10 +67,9 @@ jobs:
           fi
 
           SHORT=$(echo "${{ github.sha }}" | cut -c1-7)
-          OUT="VibeForge-$SHORT.apk"
-          cp "$SRC" "$OUT"
-          echo "name=$OUT" >> "$GITHUB_OUTPUT"
-          echo "Collected $OUT ($(stat -c%s "$OUT") bytes) from $SRC"
+          cp "$SRC" "VibeForge.apk"
+          echo "name=VibeForge.apk" >> "$GITHUB_OUTPUT"
+          echo "Collected VibeForge.apk ($(stat -c%s VibeForge.apk) bytes) from $SRC, commit $SHORT"
 
       # Two delivery routes on purpose. The release is what the phone reads;
       # the artifact is the fallback when release creation is refused, which
@@ -79,7 +78,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: apk
-          path: VibeForge-*.apk
+          path: VibeForge.apk
           retention-days: 30
           if-no-files-found: error
 
@@ -89,9 +88,12 @@ jobs:
         with:
           tag_name: latest
           name: Latest VibeForge build
-          body: Built from `${{ github.sha }}`.
-          files: VibeForge-*.apk
-          prerelease: true
+          body: |
+            Install: https://github.com/${{ github.repository }}/releases/latest/download/VibeForge.apk
+
+            Built from `${{ github.sha }}`.
+          files: VibeForge.apk
+          make_latest: true
           fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

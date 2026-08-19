@@ -11,8 +11,8 @@ android {
         applicationId "dev.vibeforge.console"
         minSdk 26
         targetSdk 34
-        versionCode 8
-        versionName "2.3"
+        versionCode 9
+        versionName "2.4"
     }
 
     // Same signing story as any sideloaded app: a persistent key from repo
